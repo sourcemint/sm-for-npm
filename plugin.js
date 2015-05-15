@@ -116,13 +116,38 @@ exports.install = function (basePath, options, callback) {
     return establishContext(cacheDirpath, function (err, cacheDirpath) {
     	if (err) return callback(err);
 
-
+    	// TODO: Move to org.sourcemint.genesis.lib
 	    function restoreInstallFromCache (hash, callback) {
-			var archivePath = PATH.join(cacheDirpath, hash + ".tgz");
+			var archivePath = PATH.join(cacheDirpath, hash);
 			return FS.exists(archivePath, function (exists) {
 				if (!exists) {
 					return callback(null, false);
 				}
+				log("Restoring install '" + basePath + "' from cache '" + archivePath + "'");
+				var proc = SPAWN("rsync", [
+					"-av",
+					"./",
+					basePath
+				], {
+					cwd: archivePath
+				});
+				proc.on('error', callback);
+				proc.stdout.on('data', function (data) {
+					process.stdout.write(data);
+				});
+				var stderr = [];
+				proc.stderr.on('data', function (data) {
+					stderr.push(data.toString());
+					process.stderr.write(data);
+				});
+				return proc.on('close', function (code) {
+					if (code !== 0) {
+						console.error("ERROR: rsync exited with code '" + code + "'");
+						return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
+					}
+					return callback(null);
+				});
+				/*
 				log("Extract archive '" + archivePath + "' to '" + basePath + "'");
 				// TODO: Instead of extracting archive, first see if there is an expanded form.
 				var proc = SPAWN("tar", [
@@ -148,32 +173,108 @@ exports.install = function (basePath, options, callback) {
 					}
 					return callback(null, true);
 				});
+				*/
 			});
 	    }
 
+    	// TODO: Move to org.sourcemint.genesis.lib
 	    function createSnapshot (hash, paths, callback) {
 			log("Creating snapshot for: " + basePath);
 
-			var archivePath = PATH.join(cacheDirpath, hash + ".tgz");
+			var archivePath = PATH.join(cacheDirpath, hash);
 
 			return FS.exists(archivePath, function (exists) {
 				if (exists) {
 					return callback(null);
 				}
-				log("Creating archive '" + archivePath + "' from '" + basePath + "'");
+				log("Copying to cache from '" + basePath + "' to '" + archivePath + "'");
 				if (!FS.existsSync(PATH.dirname(archivePath))) {
 					FS.mkdirsSync(PATH.dirname(archivePath));
 				}
-				var tmpBasename = PATH.basename(archivePath) + "~tmp";
 				var tmpPath = archivePath + "~tmp";
 				if (FS.existsSync(tmpPath)) {
 					FS.removeSync(tmpPath);
 				}
-				// TODO: Instead of creating archive, copy files.
+				function copyFiles (fromPath, toPath, callback) {
+
+					var fileListPath = toPath + ".files.txt~tmp";
+
+					return FS.outputFile(fileListPath, paths.map(function (path) {
+						return path.substring(1);
+					}).join("\n"), function (err) {
+						if (err) return callback(err);
+						var proc = SPAWN("rsync", [
+							"-av",
+							"--files-from=" + fileListPath,
+							"./",
+							toPath
+						], {
+							cwd: fromPath
+						});
+						proc.on('error', callback);
+						proc.stdout.on('data', function (data) {
+							process.stdout.write(data);
+						});
+						var stderr = [];
+						proc.stderr.on('data', function (data) {
+							stderr.push(data.toString());
+							process.stderr.write(data);
+						});
+						return proc.on('close', function (code) {
+							if (code !== 0) {
+								console.error("ERROR: rsync exited with code '" + code + "'");
+								return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
+							}
+							return callback(null);
+						});
+					});
+					/*
+					TODO: Optionally use 'ncp'
+						var includedPaths = {};
+						paths.forEach(function (path) {
+							includedPaths[path] = true;
+						});
+	console.log("includedPaths", includedPaths);
+						NCP.ncp.limit = 16;
+						return NCP.ncp(fromPath, toPath, {
+							dereference: false,
+							clobber: true,
+							filter: function (path) {
+								var subpath = path.substring(fromPath.length);
+	console.log("check path", subpath);							
+								if (!subpath) return true;
+
+								if (includedPaths[subpath]) {
+									console.log("found !! PATH", subpath);
+									return true;
+								} else {
+									console.log("NOT FOUND PATH", subpath);
+									return false;
+								}
+							}
+						}, function (err) {
+							if (err) {
+								console.error(err);
+								return callback(new Error("Error copying files."));
+							}
+							return callback(null);
+						});
+					*/
+				}
+				return copyFiles(basePath, tmpPath, function (err) {
+					if (err) return callback(err);
+
+					log("Taking live '" + tmpPath + "' by moving to '" + archivePath + "'");
+
+					return FS.move(tmpPath, archivePath, callback);
+				});
+
+/*
+				// TODO: Optionally compress in seperate process once copied.
 				var proc = SPAWN("tar", [
 					"-cz",
 					"-C", basePath,
-					"-f", tmpBasename,
+					"-f", PATH.basename(archivePath) + "~tmp",
 					"-T",
 					"-"
 				], {
@@ -199,7 +300,7 @@ exports.install = function (basePath, options, callback) {
 					return path.substring(1);
 				}).join("\n"));
 	            proc.stdin.end();
-	            return;
+*/
 			});
 	    }
 
@@ -247,53 +348,55 @@ exports.install = function (basePath, options, callback) {
 				}
 				var waitfor = WAITFOR.parallel(callback);
 				filenames.forEach(function (filename) {
-					return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
-						rootPath: basePath
-					}, function(err, descriptor) {
-						if (err) return done(err);
-						if (descriptor.normalized.dependencies) {
-							for (var dependencyType in descriptor.normalized.dependencies) {
-								for (var dependencyName in descriptor.normalized.dependencies[dependencyType]) {
+					return waitfor(function (callback) {
+						return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
+							rootPath: basePath
+						}, function(err, descriptor) {
+							if (err) return callback(err);
+							var waitfor = WAITFOR.parallel(callback);
+							if (descriptor.normalized.dependencies) {
+								for (var dependencyType in descriptor.normalized.dependencies) {
+									for (var dependencyName in descriptor.normalized.dependencies[dependencyType]) {
 
-									// If package is found in available packages we symlink it
-									// so that 'npm' skips installing it when it runs.
-									if (packages[dependencyName]) {
-										waitfor(
-											dependencyName,
-											filename,
-											function (dependencyName, filename, callback) {
-												var sourcePath = packages[dependencyName];
-												var targetPath = PATH.join(basePath, filename, "../node_modules", dependencyName);
-												return FS.exists(targetPath, function (exists) {
-													if (exists) return callback(null);
+										// If package is found in available packages we symlink it
+										// so that 'npm' skips installing it when it runs.
+										if (packages[dependencyName]) {
+											waitfor(
+												dependencyName,
+												filename,
+												function (dependencyName, filename, callback) {
+													var sourcePath = packages[dependencyName];
+													var targetPath = PATH.join(basePath, filename, "../node_modules", dependencyName);
+													return FS.exists(targetPath, function (exists) {
+														if (exists) return callback(null);
 
-													function ensureTargetDirpathExists (callback) {
-														var targetDirpath = PATH.dirname(targetPath);
-														return FS.exists(targetDirpath, function (exists) {
-															if (exists) return callback(null);
-															return FS.mkdirs(targetDirpath, callback);
-														});
-													}
+														function ensureTargetDirpathExists (callback) {
+															var targetDirpath = PATH.dirname(targetPath);
+															return FS.exists(targetDirpath, function (exists) {
+																if (exists) return callback(null);
+																return FS.mkdirs(targetDirpath, callback);
+															});
+														}
 
-													return ensureTargetDirpathExists(function (err) {
-														if (err) return callback(err);
+														return ensureTargetDirpathExists(function (err) {
+															if (err) return callback(err);
 
-														log("Symlinking dependency for package '" + dependencyName + "' from '" + sourcePath + "' to '" + targetPath + "'");
+															log("Symlinking dependency for package '" + dependencyName + "' from '" + sourcePath + "' to '" + targetPath + "'");
 
-														// TODO: Test version and other aspect compatibilty and pick best source version
-														//       If not matching version is available error out or continue if ignoring.
+															// TODO: Test version and other aspect compatibilty and pick best source version
+															//       If not matching version is available error out or continue if ignoring.
 
-														return FS.symlink(sourcePath, targetPath, callback);
-													});														
-												});
-											}
-										);
+															return FS.symlink(sourcePath, targetPath, callback);
+														});														
+													});
+												}
+											);
+										}
 									}
 								}
 							}
-						}
-
-						return callback(null);
+							return waitfor();
+						});
 					});
 				});
 				return waitfor();
