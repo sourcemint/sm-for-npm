@@ -348,7 +348,7 @@ exports.install = function (basePath, options, callback) {
 				});
 			}
 
-			return lookup(basePath, callback);
+			return lookup(PATH.dirname(basePath), callback);
 	    }
 
 	    function linkAvailableDependencies (packages, callback) {
@@ -359,7 +359,7 @@ exports.install = function (basePath, options, callback) {
 				if (filenames.length === 0) {
 					return callback(null);
 				}
-				var waitfor = WAITFOR.serial(callback);
+				var waitfor = WAITFOR.parallel(callback);
 				filenames.forEach(function (filename) {
 					return waitfor(function (callback) {
 						return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
