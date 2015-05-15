@@ -490,7 +490,7 @@ exports.install = function (basePath, options, callback) {
 						return indexAvailablePackages(function (err, packages) {
 							if (err) return callback(err);
 
-							log("Found available packages: " + JSON.stringify(packages, null, 4));
+//							log("Found available packages: " + JSON.stringify(packages, null, 4));
 
 							return linkAvailableDependencies(packages, function (err) {
 								if (err) return callback(err);
