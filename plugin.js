@@ -106,10 +106,15 @@ exports.install = function (basePath, options, callback) {
     	//         If symlinks reach out of the system they should be configurable via the
     	//         workspace activation (<WorkspaceBasename>.activate.sh) or
     	//         workspace profile (<WorkspaceBasename>.profile.json) files.
-    	if (!process.env.PGS_PINF_EPOCH) {
-    		throw new Error("'PGS_PINF_EPOCH' environment variable is not set!");
+    	var group = null;
+    	if (process.env.PGS_PINF_EPOCH) {
+    		group = process.env.PGS_PINF_EPOCH;
+    	} else {
+    		group = "x";
+    		// TODO: Optionally throw.
+    		//throw new Error("'PGS_PINF_EPOCH' environment variable is not set!");
     	}
-    	return callback(null, PATH.join(cacheDirpath, process.env.PGS_PINF_EPOCH));
+    	return callback(null, PATH.join(cacheDirpath, group));
     }
 
 
@@ -125,7 +130,7 @@ exports.install = function (basePath, options, callback) {
 				}
 				log("Restoring install '" + basePath + "' from cache '" + archivePath + "'");
 				var proc = SPAWN("rsync", [
-					"-av",
+					"-a",
 					"./",
 					basePath
 				], {
@@ -197,6 +202,13 @@ exports.install = function (basePath, options, callback) {
 				}
 				function copyFiles (fromPath, toPath, callback) {
 
+					if (paths.length === 0) {
+						return FS.mkdir(toPath, function (err) {
+							if (err) return callback(err);
+							return callback(null);
+						});
+					}
+
 					var fileListPath = toPath + ".files.txt~tmp";
 
 					return FS.outputFile(fileListPath, paths.map(function (path) {
@@ -204,7 +216,7 @@ exports.install = function (basePath, options, callback) {
 					}).join("\n"), function (err) {
 						if (err) return callback(err);
 						var proc = SPAWN("rsync", [
-							"-av",
+							"-a",
 							"--files-from=" + fileListPath,
 							"./",
 							toPath
@@ -225,7 +237,8 @@ exports.install = function (basePath, options, callback) {
 								console.error("ERROR: rsync exited with code '" + code + "'");
 								return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
 							}
-							return callback(null);
+							// TODO: Optionally keep file as simple manifest
+							return FS.remove(fileListPath, callback);
 						});
 					});
 					/*
