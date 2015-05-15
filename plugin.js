@@ -365,7 +365,13 @@ exports.install = function (basePath, options, callback) {
 						return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
 							rootPath: basePath
 						}, function(err, descriptor) {
-							if (err) return callback(err);
+							if (err) {
+								// Ignoring errors
+								if (process.env.VERBOSE) {
+									console.error("Warning: Error while parsing '" + PATH.join(basePath, filename) + "':", err.stack);
+								}
+								return callback(null);
+							}
 							var waitfor = WAITFOR.parallel(callback);
 							if (descriptor.normalized.dependencies) {
 								for (var dependencyType in descriptor.normalized.dependencies) {
