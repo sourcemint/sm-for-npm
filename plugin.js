@@ -359,7 +359,7 @@ exports.install = function (basePath, options, callback) {
 				if (filenames.length === 0) {
 					return callback(null);
 				}
-				var waitfor = WAITFOR.parallel(callback);
+				var waitfor = WAITFOR.serial(callback);
 				filenames.forEach(function (filename) {
 					return waitfor(function (callback) {
 						return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
