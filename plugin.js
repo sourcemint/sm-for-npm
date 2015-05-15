@@ -341,6 +341,17 @@ exports.install = function (basePath, options, callback) {
 									packages[filename] = PATH.join(lookupPath, filename);
 								}
 							});
+							filenames.forEach(function (filename) {
+								if (/^\./.test(filename)) return;
+								// 'smi' compatibility where temporary dirs get created during install.
+								if (
+									!packages[filename] &&
+									/-[a-z0-9]{7}$/.test(filename) &&
+									!packages[filename.substring(0, filename.length-8)]
+								) {
+									packages[filename.substring(0, filename.length-8)] = PATH.join(lookupPath, filename);
+								}
+							});
 							return goUp(callback);
 						});
 					}
@@ -479,6 +490,8 @@ exports.install = function (basePath, options, callback) {
 
 						return indexAvailablePackages(function (err, packages) {
 							if (err) return callback(err);
+
+							log("Found available packages: " + JSON.stringify(packages, null, 4));
 
 							return linkAvailableDependencies(packages, function (err) {
 								if (err) return callback(err);
