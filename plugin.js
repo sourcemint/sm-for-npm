@@ -345,7 +345,6 @@ exports.install = function (basePath, options, callback) {
 								if (/^\./.test(filename)) return;
 								// 'smi' compatibility where temporary dirs get created during install.
 								if (
-									!packages[filename] &&
 									/-[a-z0-9]{7}$/.test(filename) &&
 									!packages[filename.substring(0, filename.length-8)]
 								) {
