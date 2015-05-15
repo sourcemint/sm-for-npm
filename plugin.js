@@ -383,13 +383,18 @@ exports.install = function (basePath, options, callback) {
 								return callback(null);
 							}
 							var waitfor = WAITFOR.parallel(callback);
+							var dependencyNames = {};
 							if (descriptor.normalized.dependencies) {
 								for (var dependencyType in descriptor.normalized.dependencies) {
 									for (var dependencyName in descriptor.normalized.dependencies[dependencyType]) {
 
 										// If package is found in available packages we symlink it
 										// so that 'npm' skips installing it when it runs.
-										if (packages[dependencyName]) {
+										if (
+											packages[dependencyName] &&
+											!dependencyNames[dependencyName]
+										) {
+											dependencyNames[dependencyName] = true;
 											waitfor(
 												dependencyName,
 												filename,
