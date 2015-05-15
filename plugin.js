@@ -7,6 +7,7 @@ const SPAWN = require("child_process").spawn;
 const JSON_STABLE_STRINGIFY = require("json-stable-stringify");
 const GLOB = require("glob");
 const PACKAGE_INSIGHT = require("pinf-it-package-insight");
+const WAITFOR = require("waitfor");
 
 
 exports.install = function (basePath, options, callback) {
@@ -239,16 +240,63 @@ exports.install = function (basePath, options, callback) {
 	    function linkAvailableDependencies (packages, callback) {
 			return GLOB("**/package.json", {
 				cwd: basePath
-			}, function (err, files) {
+			}, function (err, filenames) {
 				if (err) return callback(err);
-				if (files.length === 0) {
+				if (filenames.length === 0) {
 					return callback(null);
 				}
+				var waitfor = WAITFOR.parallel(callback);
+				filenames.forEach(function (filename) {
+					return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
+						rootPath: basePath
+					}, function(err, descriptor) {
+						if (err) return done(err);
+						if (descriptor.normalized.dependencies) {
+							for (var dependencyType in descriptor.normalized.dependencies) {
+								for (var dependencyName in descriptor.normalized.dependencies[dependencyType]) {
 
-// TODO: Use PACKAGE_INSIGHT to load info for each package descriptor.			
+									// If package is found in available packages we symlink it
+									// so that 'npm' skips installing it when it runs.
+									if (packages[dependencyName]) {
+										waitfor(
+											dependencyName,
+											filename,
+											function (dependencyName, filename, callback) {
+												var sourcePath = packages[dependencyName];
+												var targetPath = PATH.join(basePath, filename, "../node_modules", dependencyName);
+												return FS.exists(targetPath, function (exists) {
+													if (exists) return callback(null);
 
+													function ensureTargetDirpathExists (callback) {
+														var targetDirpath = PATH.dirname(targetPath);
+														return FS.exists(targetDirpath, function (exists) {
+															if (exists) return callback(null);
+															return FS.mkdirs(targetDirpath, callback);
+														});
+													}
 
-				return callback(null);
+													return ensureTargetDirpathExists(function (err) {
+														if (err) return callback(err);
+
+														log("Symlinking dependency for package '" + dependencyName + "' from '" + sourcePath + "' to '" + targetPath + "'");
+
+														// TODO: Test version and other aspect compatibilty and pick best source version
+														//       If not matching version is available error out or continue if ignoring.
+
+														return FS.symlink(sourcePath, targetPath, callback);
+													});														
+												});
+											}
+										);
+									}
+								}
+							}
+						}
+
+						return callback(null);
+					});
+				});
+				return waitfor();
 			});
 	    }
 
