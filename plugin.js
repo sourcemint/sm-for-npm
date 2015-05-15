@@ -150,7 +150,7 @@ exports.install = function (basePath, options, callback) {
 						console.error("ERROR: rsync exited with code '" + code + "'");
 						return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
 					}
-					return callback(null);
+					return callback(null, true);
 				});
 				/*
 				log("Extract archive '" + archivePath + "' to '" + basePath + "'");
