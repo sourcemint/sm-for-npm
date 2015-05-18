@@ -362,7 +362,11 @@ exports.install = function (basePath, options, callback) {
 	    }
 
 	    function linkAvailableDependencies (packages, callback) {
-			return GLOB("**/package.json", {
+
+	    	// TODO: Link dependencies in nested packages if declared instead of all found packages.
+
+//			return GLOB("**/package.json", {
+			return GLOB("/package.json", {
 				cwd: basePath
 			}, function (err, filenames) {
 				if (err) return callback(err);
