@@ -69,29 +69,42 @@ exports.install = function (basePath, options, callback) {
 	}
 
     function indexDirtree (callback) {
+    	// Index files but not dependencies.
+    	// Use pinf-it-package-insight to determine dependencies.
         var walker = new FSWALKER.Walker(basePath);
         var opts = {};
+        opts.ignore = [
+        	"/node_modules/"
+        ];
         opts.returnIgnoredFiles = false;
         opts.returnIgnoredFilesInPaths = true;
-        opts.includeDependencies = true;
+        opts.includeDependencies = false;
         opts.respectDistignore = false;
         opts.respectNestedIgnore = false;
-        opts.excludeMtime = false;
+        opts.excludeMtime = true;
         return walker.walk(opts, function (err, paths, summary) {
         	if (err) return callback(err);
-        	var hashFiles = {};
+        	var hash = {};
         	// TODO: Possibly detect more changes.
         	Object.keys(paths).forEach(function (path) {
         		if (/^\/node_modules(\/|$)/.test(path)) {
         			return;
         		}
-            	hashFiles[path] = paths[path].size;
+            	hash[path] = paths[path].size;
             });
-        	return callback(null, {
-                paths: paths,
-                summary: summary,
-                hash: CRYPTO.createHash("md5").update(JSON_STABLE_STRINGIFY(hashFiles)).digest("hex")
-            });
+			return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, 'package.json'), {
+				rootPath: basePath
+			}, function(err, descriptor) {
+				if (err) return callback(err);
+
+//console.log("paths", basePath, paths);
+	        	return callback(null, {
+	                paths: paths,
+	                summary: summary,
+	                pathsHash: CRYPTO.createHash("md5").update(JSON_STABLE_STRINGIFY(hash)).digest("hex"),
+	                dependenciesHash: CRYPTO.createHash("md5").update(JSON_STABLE_STRINGIFY(descriptor.normalized.dependencies || {})).digest("hex")
+	            });
+		    });
         });
     }
 
@@ -122,198 +135,275 @@ exports.install = function (basePath, options, callback) {
     	if (err) return callback(err);
 
     	// TODO: Move to org.sourcemint.genesis.lib
-	    function restoreInstallFromCache (hash, callback) {
-			var archivePath = PATH.join(cacheDirpath, hash);
-			return FS.exists(archivePath, function (exists) {
-				if (!exists) {
-					return callback(null, false);
-				}
-				log("Restoring install '" + basePath + "' from cache '" + archivePath + "'");
-				var proc = SPAWN("rsync", [
-					"-a",
-					"./",
-					basePath
-				], {
-					cwd: archivePath
-				});
-				proc.on('error', callback);
-				proc.stdout.on('data', function (data) {
-					process.stdout.write(data);
-				});
-				var stderr = [];
-				proc.stderr.on('data', function (data) {
-					stderr.push(data.toString());
-					process.stderr.write(data);
-				});
-				return proc.on('close', function (code) {
-					if (code !== 0) {
-						console.error("ERROR: rsync exited with code '" + code + "'");
-						return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
+	    function restoreInstallFromCache (info, callback) {
+			function copy (archivePath, toPath, callback) {
+				return FS.exists(archivePath, function (exists) {
+					if (!exists) {
+						return callback(null, false);
 					}
-					return callback(null, true);
-				});
-				/*
-				log("Extract archive '" + archivePath + "' to '" + basePath + "'");
-				// TODO: Instead of extracting archive, first see if there is an expanded form.
-				var proc = SPAWN("tar", [
-					"-xz",
-					"-C", basePath,
-					"-f", PATH.basename(archivePath)
-				], {
-					cwd: PATH.dirname(archivePath)
-				});
-				proc.on('error', callback);
-				proc.stdout.on('data', function (data) {
-					process.stdout.write(data);
-				});
-				var stderr = [];
-				proc.stderr.on('data', function (data) {
-					stderr.push(data.toString());
-					process.stderr.write(data);
-				});
-				return proc.on('close', function (code) {
-					if (code !== 0) {
-						console.error("ERROR: tar exited with code '" + code + "'");
-						return callback(new Error("tar exited with code '" + code + "' and stderr: " + stderr.join("")));
-					}
-					return callback(null, true);
-				});
-				*/
+					log("Restoring install '" + toPath + "' from cache '" + archivePath + "'");
+					var proc = SPAWN("rsync", [
+						"-a",
+						".",
+						toPath
+					], {
+						cwd: archivePath
+					});
+					proc.on('error', callback);
+					proc.stdout.on('data', function (data) {
+						process.stdout.write(data);
+					});
+					var stderr = [];
+					proc.stderr.on('data', function (data) {
+						stderr.push(data.toString());
+						process.stderr.write(data);
+					});
+					return proc.on('close', function (code) {
+						if (code !== 0) {
+							console.error("ERROR: rsync exited with code '" + code + "'");
+							return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
+						}
+						return callback(null, true);
+					});
+					/*
+					log("Extract archive '" + archivePath + "' to '" + basePath + "'");
+					// TODO: Instead of extracting archive, first see if there is an expanded form.
+					var proc = SPAWN("tar", [
+						"-xz",
+						"-C", basePath,
+						"-f", PATH.basename(archivePath)
+					], {
+						cwd: PATH.dirname(archivePath)
+					});
+					proc.on('error', callback);
+					proc.stdout.on('data', function (data) {
+						process.stdout.write(data);
+					});
+					var stderr = [];
+					proc.stderr.on('data', function (data) {
+						stderr.push(data.toString());
+						process.stderr.write(data);
+					});
+					return proc.on('close', function (code) {
+						if (code !== 0) {
+							console.error("ERROR: tar exited with code '" + code + "'");
+							return callback(new Error("tar exited with code '" + code + "' and stderr: " + stderr.join("")));
+						}
+						return callback(null, true);
+					});
+					*/
+				});				
+			}
+
+			function restoreDependencies (callback) {
+				return copy(
+					PATH.join(cacheDirpath, info.dependenciesHash + "-dependencies"),
+					PATH.join(basePath, "node_modules"),
+					callback
+				);
+			}
+
+			function restoreInstallChanges (callback) {
+				return copy(
+					PATH.join(cacheDirpath, info.pathsHash + "-changes"),
+					basePath,
+					callback
+				);
+			}
+
+			return restoreDependencies(function (err) {
+				if (err) return callback(err);
+
+				return restoreInstallChanges(callback);
 			});
 	    }
 
     	// TODO: Move to org.sourcemint.genesis.lib
-	    function createSnapshot (hash, paths, callback) {
-			log("Creating snapshot for: " + basePath);
+	    function createSnapshot (info, paths, callback) {
 
-			var archivePath = PATH.join(cacheDirpath, hash);
+			function create (archivePath, paths, callback) {
 
-			return FS.exists(archivePath, function (exists) {
-				if (exists) {
-					return callback(null);
-				}
-				log("Copying to cache from '" + basePath + "' to '" + archivePath + "'");
-				if (!FS.existsSync(PATH.dirname(archivePath))) {
-					FS.mkdirsSync(PATH.dirname(archivePath));
-				}
-				var tmpPath = archivePath + "~tmp";
-				if (FS.existsSync(tmpPath)) {
-					FS.removeSync(tmpPath);
-				}
-				function copyFiles (fromPath, toPath, callback) {
+				log("Creating snapshot for: " + basePath);
 
-					if (paths.length === 0) {
-						return FS.mkdir(toPath, function (err) {
-							if (err) return callback(err);
-							return callback(null);
-						});
+				return FS.exists(archivePath, function (exists) {
+					if (exists) {
+						return callback(null);
 					}
+					log("Copying to cache from '" + basePath + "' to '" + archivePath + "'");
+					if (!FS.existsSync(PATH.dirname(archivePath))) {
+						FS.mkdirsSync(PATH.dirname(archivePath));
+					}
+					var tmpPath = archivePath + "~tmp";
+					if (FS.existsSync(tmpPath)) {
+						FS.removeSync(tmpPath);
+					}
+					function copyFiles (fromPath, toPath, callback) {
 
-					var fileListPath = toPath + ".files.txt~tmp";
-
-					return FS.outputFile(fileListPath, paths.map(function (path) {
-						return path.substring(1);
-					}).join("\n"), function (err) {
-						if (err) return callback(err);
-						var proc = SPAWN("rsync", [
-							"-a",
-							"--files-from=" + fileListPath,
-							"./",
-							toPath
-						], {
-							cwd: fromPath
-						});
-						proc.on('error', callback);
-						proc.stdout.on('data', function (data) {
-							process.stdout.write(data);
-						});
-						var stderr = [];
-						proc.stderr.on('data', function (data) {
-							stderr.push(data.toString());
-							process.stderr.write(data);
-						});
-						return proc.on('close', function (code) {
-							if (code !== 0) {
-								console.error("ERROR: rsync exited with code '" + code + "'");
-								return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
-							}
-							// TODO: Optionally keep file as simple manifest
-							return FS.remove(fileListPath, callback);
-						});
-					});
-					/*
-					TODO: Optionally use 'ncp'
-						var includedPaths = {};
-						paths.forEach(function (path) {
-							includedPaths[path] = true;
-						});
-	console.log("includedPaths", includedPaths);
-						NCP.ncp.limit = 16;
-						return NCP.ncp(fromPath, toPath, {
-							dereference: false,
-							clobber: true,
-							filter: function (path) {
-								var subpath = path.substring(fromPath.length);
-	console.log("check path", subpath);							
-								if (!subpath) return true;
-
-								if (includedPaths[subpath]) {
-									console.log("found !! PATH", subpath);
-									return true;
-								} else {
-									console.log("NOT FOUND PATH", subpath);
-									return false;
+						if (typeof paths === "string") {
+							var proc = SPAWN("cp", [
+								"-Rf",
+								paths,
+								toPath
+							], {
+								cwd: fromPath
+							});
+							proc.on('error', callback);
+							proc.stdout.on('data', function (data) {
+								process.stdout.write(data);
+							});
+							var stderr = [];
+							proc.stderr.on('data', function (data) {
+								stderr.push(data.toString());
+								process.stderr.write(data);
+							});
+							return proc.on('close', function (code) {
+								if (code !== 0) {
+									console.error("ERROR: rsync exited with code '" + code + "'");
+									return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
 								}
+								return callback(null);
+							});
+
+						} else {
+
+							if (paths.length === 0) {
+								return FS.mkdir(toPath, function (err) {
+									if (err) return callback(err);
+									return callback(null);
+								});
 							}
-						}, function (err) {
-							if (err) {
-								console.error(err);
-								return callback(new Error("Error copying files."));
-							}
-							return callback(null);
-						});
-					*/
-				}
-				return copyFiles(basePath, tmpPath, function (err) {
-					if (err) return callback(err);
 
-					log("Taking live '" + tmpPath + "' by moving to '" + archivePath + "'");
+							var fileListPath = toPath + ".files.txt~tmp";
+							return FS.outputFile(fileListPath, paths.map(function (path) {
+								return path.substring(1);
+							}).join("\n"), function (err) {
+								if (err) return callback(err);
+								var proc = SPAWN("rsync", [
+									"-a",
+									"--files-from=" + fileListPath,
+									"./",
+									toPath
+								], {
+									cwd: fromPath
+								});
+								proc.on('error', callback);
+								proc.stdout.on('data', function (data) {
+									process.stdout.write(data);
+								});
+								var stderr = [];
+								proc.stderr.on('data', function (data) {
+									stderr.push(data.toString());
+									process.stderr.write(data);
+								});
+								return proc.on('close', function (code) {
+									if (code !== 0) {
+										console.error("ERROR: rsync exited with code '" + code + "'");
+										return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
+									}
+									// TODO: Optionally keep file as simple manifest
+									return FS.remove(fileListPath, callback);
+								});
+							});
+						}
+						/*
+						TODO: Optionally use 'ncp'
+							var includedPaths = {};
+							paths.forEach(function (path) {
+								includedPaths[path] = true;
+							});
+		console.log("includedPaths", includedPaths);
+							NCP.ncp.limit = 16;
+							return NCP.ncp(fromPath, toPath, {
+								dereference: false,
+								clobber: true,
+								filter: function (path) {
+									var subpath = path.substring(fromPath.length);
+		console.log("check path", subpath);							
+									if (!subpath) return true;
 
-					return FS.move(tmpPath, archivePath, callback);
-				});
-
-/*
-				// TODO: Optionally compress in seperate process once copied.
-				var proc = SPAWN("tar", [
-					"-cz",
-					"-C", basePath,
-					"-f", PATH.basename(archivePath) + "~tmp",
-					"-T",
-					"-"
-				], {
-					cwd: PATH.dirname(archivePath)
-				});
-				proc.on('error', callback);
-				proc.stdout.on('data', function (data) {
-					process.stdout.write(data);
-				});
-				var stderr = [];
-				proc.stderr.on('data', function (data) {
-					stderr.push(data.toString());
-					process.stderr.write(data);
-				});
-				proc.on('close', function (code) {
-					if (code !== 0) {
-						console.error("ERROR: tar exited with code '" + code + "'");
-						return callback(new Error("tar exited with code '" + code + "' and stderr: " + stderr.join("")));
+									if (includedPaths[subpath]) {
+										console.log("found !! PATH", subpath);
+										return true;
+									} else {
+										console.log("NOT FOUND PATH", subpath);
+										return false;
+									}
+								}
+							}, function (err) {
+								if (err) {
+									console.error(err);
+									return callback(new Error("Error copying files."));
+								}
+								return callback(null);
+							});
+						*/
 					}
-					return FS.move(tmpPath, archivePath, callback);
+					return copyFiles(basePath, tmpPath, function (err) {
+						if (err) return callback(err);
+
+						log("Freezing snapshot '" + tmpPath + "' by moving to '" + archivePath + "'");
+
+						return FS.move(tmpPath, archivePath, callback);
+					});
+
+	/*
+					// TODO: Optionally compress in seperate process once copied.
+					var proc = SPAWN("tar", [
+						"-cz",
+						"-C", basePath,
+						"-f", PATH.basename(archivePath) + "~tmp",
+						"-T",
+						"-"
+					], {
+						cwd: PATH.dirname(archivePath)
+					});
+					proc.on('error', callback);
+					proc.stdout.on('data', function (data) {
+						process.stdout.write(data);
+					});
+					var stderr = [];
+					proc.stderr.on('data', function (data) {
+						stderr.push(data.toString());
+						process.stderr.write(data);
+					});
+					proc.on('close', function (code) {
+						if (code !== 0) {
+							console.error("ERROR: tar exited with code '" + code + "'");
+							return callback(new Error("tar exited with code '" + code + "' and stderr: " + stderr.join("")));
+						}
+						return FS.move(tmpPath, archivePath, callback);
+					});
+					proc.stdin.write(paths.map(function (path) {
+						return path.substring(1);
+					}).join("\n"));
+		            proc.stdin.end();
+	*/
 				});
-				proc.stdin.write(paths.map(function (path) {
-					return path.substring(1);
-				}).join("\n"));
-	            proc.stdin.end();
-*/
+			}
+
+			function snapshotDependencies (callback) {
+				return FS.exists(PATH.join(basePath, "node_modules"), function (exists) {
+					if (!exists) return callback(null);
+					return create(
+						PATH.join(cacheDirpath, info.dependenciesHash + "-dependencies"),
+						"node_modules",
+						callback
+					);
+				});
+			}
+
+			function snapshotInstallChanges (callback) {
+				return create(
+					PATH.join(cacheDirpath, info.pathsHash + "-changes"),
+					paths,
+					callback
+				);
+			}
+
+			return snapshotDependencies(function (err) {
+				if (err) return callback(err);
+
+				return snapshotInstallChanges(callback);
 			});
 	    }
 
@@ -489,7 +579,7 @@ exports.install = function (basePath, options, callback) {
 				return indexDirtree(function (err, dirtreeBefore) {
 					if (err) return callback(err);
 
-					return restoreInstallFromCache(dirtreeBefore.hash, function (err, installed) {
+					return restoreInstallFromCache(dirtreeBefore, function (err, installed) {
 						if (err) return callback(err);
 						if (installed) {
 							log("Installed from cache");
@@ -530,7 +620,7 @@ exports.install = function (basePath, options, callback) {
 										// Store the set of created files for the original hash so that
 										// when we install the next time we can look for an pre-existing
 										// archive based on the 'dirtreeBefore.hash' created above.
-										return createSnapshot(dirtreeBefore.hash, paths, function (err) {
+										return createSnapshot(dirtreeBefore, paths, function (err) {
 											if (err) return callback(err);
 
 											delete dirtreeBefore.paths;

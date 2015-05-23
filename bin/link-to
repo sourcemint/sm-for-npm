@@ -1,12 +1,14 @@
 #!/bin/bash
 # Source https://github.com/cadorn/bash.origin
-if [ -z "$BO_ROOT_SCRIPT_PATH" ]; then . "$HOME/.bash.origin"; else . "$BO_ROOT_SCRIPT_PATH"; fi
+. "$BO_ROOT_SCRIPT_PATH"
 function init {
 	eval BO_SELF_BASH_SOURCE="$BO_READ_SELF_BASH_SOURCE"
 	BO_deriveSelfDir ___TMP___ "$BO_SELF_BASH_SOURCE"
-	local __BO_DIR__="$___TMP___"
+	PGS_DIR="$___TMP___"
 
 
-	BO_run_node "$__BO_DIR__/smi-for-npm.js" $@
+	rm -f "$1" > /dev/null || true
+	BO_log "$VERBOSE" "Linking '$PGS_DIR/smi-for-npm' to '$1'"
+	ln -s "$PGS_DIR/smi-for-npm" "$1"
 }
 init $@
