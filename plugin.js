@@ -10,9 +10,174 @@ const PACKAGE_INSIGHT = require("pinf-it-package-insight");
 const WAITFOR = require("waitfor");
 
 
+
+function makeAPI (basePath, options) {
+
+	function log (message) {
+		if (options && options.verbose) {
+			console.log("[smi-for-npm]", message);
+		}
+	}
+
+	var exports = {};
+
+    exports.indexAvailablePackages = function (callback) {
+    	// TODO: Use 'pinf-it-package-insight' data if it is available instead of looking ourselves.
+    	// TODO: Embed 'pinf-it-package-insight' plugin for nodejs here instead of duplicating code below.
+    	var packages = {};
+		// Lookup all packages not already found in parent directories.
+		function lookup (basePath, callback) {
+			var lookupPath = PATH.join(basePath, "node_modules");
+			return FS.exists(lookupPath, function (exists) {
+				function goUp (callback) {
+					if (PATH.dirname(basePath) === basePath) {
+						return callback(null, packages);
+					}
+					return lookup(PATH.dirname(basePath), callback);
+				}
+				if (exists) {
+					return FS.readdir(lookupPath, function (err, filenames) {
+						if (err) return callback(err);
+						filenames.forEach(function (filename) {
+							if (/^\./.test(filename)) return;
+							// TODO: Exclude directories.
+							if (!packages[filename]) {
+								packages[filename] = PATH.join(lookupPath, filename);
+							}
+						});
+						filenames.forEach(function (filename) {
+							if (/^\./.test(filename)) return;
+							// 'smi' compatibility where temporary dirs get created during install.
+							if (
+								/-[a-z0-9]{7}$/.test(filename) &&
+								!packages[filename.substring(0, filename.length-8)]
+							) {
+								packages[filename.substring(0, filename.length-8)] = PATH.join(lookupPath, filename);
+							}
+						});
+						return goUp(callback);
+					});
+				}
+				return goUp(callback);
+			});
+		}
+
+		return lookup(PATH.dirname(basePath), callback);
+    }
+
+    exports.linkAvailableDependencies = function (packages, callback) {
+
+    	// TODO: Link dependencies in nested packages if declared instead of all found packages.
+
+//			return GLOB("**/package.json", {
+		return GLOB("package.json", {
+			cwd: basePath
+		}, function (err, filenames) {
+			if (err) return callback(err);
+			if (filenames.length === 0) {
+				return callback(null);
+			}
+			var waitfor = WAITFOR.parallel(callback);
+			filenames.forEach(function (filename) {
+				return waitfor(function (callback) {
+					return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
+						rootPath: basePath
+					}, function(err, descriptor) {
+						if (err) {
+							// Ignoring errors
+							if (process.env.VERBOSE) {
+								console.error("Warning: Error while parsing '" + PATH.join(basePath, filename) + "':", err.stack);
+							}
+							return callback(null);
+						}
+						var waitfor = WAITFOR.parallel(callback);
+						var dependencyNames = {};
+						if (descriptor.normalized.dependencies) {
+							for (var dependencyType in descriptor.normalized.dependencies) {
+								for (var dependencyName in descriptor.normalized.dependencies[dependencyType]) {
+
+									// If package is found in available packages we symlink it
+									// so that 'npm' skips installing it when it runs.
+									if (
+										packages[dependencyName] &&
+										!dependencyNames[dependencyName]
+									) {
+										dependencyNames[dependencyName] = true;
+										waitfor(
+											dependencyName,
+											filename,
+											function (dependencyName, filename, callback) {
+												var sourcePath = packages[dependencyName];
+												var targetPath = PATH.join(basePath, filename, "../node_modules", dependencyName);
+												return FS.exists(targetPath, function (exists) {
+													if (exists) {
+														if (FS.lstatSync(targetPath).isSymbolicLink()) {
+															return callback(null);
+														} else {
+															FS.removeSync(targetPath);
+														}
+													}
+
+													function ensureTargetDirpathExists (callback) {
+														var targetDirpath = PATH.dirname(targetPath);
+														return FS.exists(targetDirpath, function (exists) {
+															if (exists) return callback(null);
+															return FS.mkdirs(targetDirpath, callback);
+														});
+													}
+
+													return ensureTargetDirpathExists(function (err) {
+														if (err) return callback(err);
+
+														log("Symlinking dependency for package '" + dependencyName + "' from '" + sourcePath + "' to '" + targetPath + "'");
+
+														// TODO: Test version and other aspect compatibilty and pick best source version
+														//       If not matching version is available error out or continue if ignoring.
+
+														return FS.symlink(sourcePath, targetPath, callback);
+													});														
+												});
+											}
+										);
+									}
+								}
+							}
+						}
+						return waitfor();
+					});
+				});
+			});
+			return waitfor();
+		});
+    }
+
+    return exports;
+}
+
+
+exports.relink = function (basePath, options, callback) {
+
+	options = options || {};
+
+	var api = makeAPI(basePath, options);
+
+	return api.indexAvailablePackages(function (err, packages) {
+		if (err) return callback(err);
+
+		return api.linkAvailableDependencies(packages, function (err) {
+			if (err) return callback(err);
+
+			return callback(null);
+		});
+	});
+}
+
+
 exports.install = function (basePath, options, callback) {
 
 	options = options || {};
+
+	var api = makeAPI(basePath, options);
 
 	var cacheDirpath = null;
 	if (!options.cacheBasePath) {
@@ -407,130 +572,6 @@ exports.install = function (basePath, options, callback) {
 			});
 	    }
 
-	    function indexAvailablePackages (callback) {
-	    	// TODO: Use 'pinf-it-package-insight' data if it is available instead of looking ourselves.
-	    	// TODO: Embed 'pinf-it-package-insight' plugin for nodejs here instead of duplicating code below.
-	    	var packages = {};
-			// Lookup all packages not already found in parent directories.
-			function lookup (basePath, callback) {
-				var lookupPath = PATH.join(basePath, "node_modules");
-				return FS.exists(lookupPath, function (exists) {
-					function goUp (callback) {
-						if (PATH.dirname(basePath) === basePath) {
-							return callback(null, packages);
-						}
-						return lookup(PATH.dirname(basePath), callback);
-					}
-					if (exists) {
-						return FS.readdir(lookupPath, function (err, filenames) {
-							if (err) return callback(err);
-							filenames.forEach(function (filename) {
-								if (/^\./.test(filename)) return;
-								// TODO: Exclude directories.
-								if (!packages[filename]) {
-									packages[filename] = PATH.join(lookupPath, filename);
-								}
-							});
-							filenames.forEach(function (filename) {
-								if (/^\./.test(filename)) return;
-								// 'smi' compatibility where temporary dirs get created during install.
-								if (
-									/-[a-z0-9]{7}$/.test(filename) &&
-									!packages[filename.substring(0, filename.length-8)]
-								) {
-									packages[filename.substring(0, filename.length-8)] = PATH.join(lookupPath, filename);
-								}
-							});
-							return goUp(callback);
-						});
-					}
-					return goUp(callback);
-				});
-			}
-
-			return lookup(PATH.dirname(basePath), callback);
-	    }
-
-	    function linkAvailableDependencies (packages, callback) {
-
-	    	// TODO: Link dependencies in nested packages if declared instead of all found packages.
-
-//			return GLOB("**/package.json", {
-			return GLOB("/package.json", {
-				cwd: basePath
-			}, function (err, filenames) {
-				if (err) return callback(err);
-				if (filenames.length === 0) {
-					return callback(null);
-				}
-				var waitfor = WAITFOR.parallel(callback);
-				filenames.forEach(function (filename) {
-					return waitfor(function (callback) {
-						return PACKAGE_INSIGHT.parseDescriptor(PATH.join(basePath, filename), {
-							rootPath: basePath
-						}, function(err, descriptor) {
-							if (err) {
-								// Ignoring errors
-								if (process.env.VERBOSE) {
-									console.error("Warning: Error while parsing '" + PATH.join(basePath, filename) + "':", err.stack);
-								}
-								return callback(null);
-							}
-							var waitfor = WAITFOR.parallel(callback);
-							var dependencyNames = {};
-							if (descriptor.normalized.dependencies) {
-								for (var dependencyType in descriptor.normalized.dependencies) {
-									for (var dependencyName in descriptor.normalized.dependencies[dependencyType]) {
-
-										// If package is found in available packages we symlink it
-										// so that 'npm' skips installing it when it runs.
-										if (
-											packages[dependencyName] &&
-											!dependencyNames[dependencyName]
-										) {
-											dependencyNames[dependencyName] = true;
-											waitfor(
-												dependencyName,
-												filename,
-												function (dependencyName, filename, callback) {
-													var sourcePath = packages[dependencyName];
-													var targetPath = PATH.join(basePath, filename, "../node_modules", dependencyName);
-													return FS.exists(targetPath, function (exists) {
-														if (exists) return callback(null);
-
-														function ensureTargetDirpathExists (callback) {
-															var targetDirpath = PATH.dirname(targetPath);
-															return FS.exists(targetDirpath, function (exists) {
-																if (exists) return callback(null);
-																return FS.mkdirs(targetDirpath, callback);
-															});
-														}
-
-														return ensureTargetDirpathExists(function (err) {
-															if (err) return callback(err);
-
-															log("Symlinking dependency for package '" + dependencyName + "' from '" + sourcePath + "' to '" + targetPath + "'");
-
-															// TODO: Test version and other aspect compatibilty and pick best source version
-															//       If not matching version is available error out or continue if ignoring.
-
-															return FS.symlink(sourcePath, targetPath, callback);
-														});														
-													});
-												}
-											);
-										}
-									}
-								}
-							}
-							return waitfor();
-						});
-					});
-				});
-				return waitfor();
-			});
-	    }
-
 	    function installWithNpm (callback) {
 			log("Installing with 'npm': " + basePath);
 			log("Commands: " + [
@@ -586,12 +627,12 @@ exports.install = function (basePath, options, callback) {
 							return callback(null);
 						}
 
-						return indexAvailablePackages(function (err, packages) {
+						return api.indexAvailablePackages(function (err, packages) {
 							if (err) return callback(err);
 
 //							log("Found available packages: " + JSON.stringify(packages, null, 4));
 
-							return linkAvailableDependencies(packages, function (err) {
+							return api.linkAvailableDependencies(packages, function (err) {
 								if (err) return callback(err);
 
 								return installWithNpm(function (err) {
