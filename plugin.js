@@ -412,7 +412,16 @@ exports.install = function (basePath, options, callback) {
 							], {
 								cwd: fromPath
 							});
-							proc.on('error', callback);
+							proc.on('error', function (err) {
+								console.error("BUT IGNORING ERROR", err.stack);
+								// TODO: Record error so we can investigate later.
+								return API.runCommands([
+									'rm -Rf "' + toPath + '"* > /dev/null || true'
+								], function (err) {
+									if (err) return callback(err);
+									return callback(null);
+								});
+							});
 							proc.stdout.on('data', function (data) {
 								process.stdout.write(data);
 							});
@@ -424,7 +433,15 @@ exports.install = function (basePath, options, callback) {
 							return proc.on('close', function (code) {
 								if (code !== 0) {
 									console.error("ERROR: rsync exited with code '" + code + "'");
-									return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
+									console.error("BUT IGNORING ERROR", new Error("rsync exited with code '" + code + "' and stderr").stack);
+									// TODO: Record error so we can investigate later.
+									return API.runCommands([
+										'rm -Rf " + toPath + " > /dev/null || true'
+									], function (err) {
+										if (err) return callback(err);
+										return callback(null);
+									});
+//									return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
 								}
 								return callback(null);
 							});
@@ -451,7 +468,16 @@ exports.install = function (basePath, options, callback) {
 								], {
 									cwd: fromPath
 								});
-								proc.on('error', callback);
+								proc.on('error', function (err) {
+									console.error("BUT IGNORING ERROR", err.stack);
+									// TODO: Record error so we can investigate later.
+									return API.runCommands([
+										'rm -Rf "' + toPath + '"* > /dev/null || true'
+									], function (err) {
+										if (err) return callback(err);
+										return callback(null);
+									});
+								});
 								proc.stdout.on('data', function (data) {
 									process.stdout.write(data);
 								});
@@ -463,7 +489,15 @@ exports.install = function (basePath, options, callback) {
 								return proc.on('close', function (code) {
 									if (code !== 0) {
 										console.error("ERROR: rsync exited with code '" + code + "'");
-										return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
+										console.error("BUT IGNORING ERROR", new Error("rsync exited with code '" + code + "' and stderr").stack);
+										// TODO: Record error so we can investigate later.
+										return API.runCommands([
+											'rm -Rf "' + toPath + '"* > /dev/null || true'
+										], function (err) {
+											if (err) return callback(err);
+											return callback(null);
+										});
+//										return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
 									}
 									// TODO: Optionally keep file as simple manifest
 									return FS.remove(fileListPath, callback);
@@ -505,6 +539,11 @@ exports.install = function (basePath, options, callback) {
 					}
 					return copyFiles(basePath, tmpPath, function (err) {
 						if (err) return callback(err);
+
+						if (!FS.existsSync(tmpPath)) {
+							log("Skip freezing snapshot '" + tmpPath + "' by moving to '" + archivePath + "' as snapshot was not created!");
+							return callback();
+						}
 
 						log("Freezing snapshot '" + tmpPath + "' by moving to '" + archivePath + "'");
 
