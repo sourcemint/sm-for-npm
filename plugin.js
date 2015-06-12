@@ -415,10 +415,7 @@ exports.install = function (basePath, options, callback) {
 							proc.on('error', function (err) {
 								console.error("BUT IGNORING ERROR", err.stack);
 								// TODO: Record error so we can investigate later.
-								return API.runCommands([
-									'rm -Rf "' + toPath + '"* > /dev/null || true'
-								], function (err) {
-									if (err) return callback(err);
+								return FS.remove(toPath, function (err) {
 									return callback(null);
 								});
 							});
@@ -435,10 +432,7 @@ exports.install = function (basePath, options, callback) {
 									console.error("ERROR: rsync exited with code '" + code + "'");
 									console.error("BUT IGNORING ERROR", new Error("rsync exited with code '" + code + "' and stderr").stack);
 									// TODO: Record error so we can investigate later.
-									return API.runCommands([
-										'rm -Rf " + toPath + " > /dev/null || true'
-									], function (err) {
-										if (err) return callback(err);
+									return FS.remove(toPath, function (err) {
 										return callback(null);
 									});
 //									return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
@@ -471,11 +465,8 @@ exports.install = function (basePath, options, callback) {
 								proc.on('error', function (err) {
 									console.error("BUT IGNORING ERROR", err.stack);
 									// TODO: Record error so we can investigate later.
-									return API.runCommands([
-										'rm -Rf "' + toPath + '"* > /dev/null || true'
-									], function (err) {
-										if (err) return callback(err);
-										return callback(null);
+									return FS.remove(toPath, function (err) {
+										return FS.remove(fileListPath, callback);
 									});
 								});
 								proc.stdout.on('data', function (data) {
@@ -491,11 +482,8 @@ exports.install = function (basePath, options, callback) {
 										console.error("ERROR: rsync exited with code '" + code + "'");
 										console.error("BUT IGNORING ERROR", new Error("rsync exited with code '" + code + "' and stderr").stack);
 										// TODO: Record error so we can investigate later.
-										return API.runCommands([
-											'rm -Rf "' + toPath + '"* > /dev/null || true'
-										], function (err) {
-											if (err) return callback(err);
-											return callback(null);
+										return FS.remove(toPath, function (err) {
+											return FS.remove(fileListPath, callback);
 										});
 //										return callback(new Error("rsync exited with code '" + code + "' and stderr: " + stderr.join("")));
 									}
