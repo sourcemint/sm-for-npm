@@ -8,7 +8,7 @@ const JSON_STABLE_STRINGIFY = require("json-stable-stringify");
 const GLOB = require("glob");
 const PACKAGE_INSIGHT = require("pinf-it-package-insight");
 const WAITFOR = require("waitfor");
-
+const SEMVER = require("semver");
 
 
 function makeAPI (basePath, options) {
@@ -709,3 +709,106 @@ exports.install = function (basePath, options, callback) {
 		});
     });
 }
+
+
+
+
+exports.for = function (API) {
+
+	var exports = {};
+
+	exports.resolve = function (resolver, config, previousResolvedConfig) {
+
+		return resolver({}).then(function (resolvedConfig) {
+
+			resolvedConfig.transitiveDependencies = {};
+
+			function addDepsForBasePath (basePath) {
+				// TODO: Do much smarter version comparison and verification instead of clobbering.
+				//       We can write multiple packages using '~\d' suffix and re-write descriptor
+				//       to map new package to old path.
+				var descriptorPath = API.PATH.join(basePath, "package.json");
+				if (API.FS.existsSync(descriptorPath)) {
+					var descriptor = JSON.parse(API.FS.readFileSync(descriptorPath, "utf8"));
+					if (descriptor.dependencies) {
+						for (var name in descriptor.dependencies) {
+							var version = require(API.PATH.join(basePath, "node_modules", name, "package.json")).version;
+							if (
+								!resolvedConfig.transitiveDependencies[name] ||
+								SEMVER.gt(version, resolvedConfig.transitiveDependencies[name])
+							) {
+								resolvedConfig.transitiveDependencies[name] = version;
+							}
+						}
+					}
+					// TODO: Also relocate 'descriptor.mappings'.
+				}
+			}
+
+			if (resolvedConfig.declaredMappings) {
+				for (var alias in resolvedConfig.declaredMappings) {
+					addDepsForBasePath(resolvedConfig.declaredMappings[alias].path);
+				}
+			}
+
+			return API.Q.denodeify(function (callback) {
+
+				return API.PACKAGE.fromFile(API.PATH.join(process.env.PGS_WORKSPACE_ROOT, ".pgs/package.json"), {}, function (err, packageDescriptor) {
+					if (err) return callback(err);
+
+					if (packageDescriptor._data.dependencies) {
+						// TODO: Index and add.
+					}
+
+					return callback(null);
+				});
+
+			})().then(function () {
+
+				return resolvedConfig;
+			});
+		});
+	}
+
+	exports.turn = function (resolvedConfig) {
+
+		if (
+			!resolvedConfig.export ||
+			!resolvedConfig.export.catalog ||
+			!resolvedConfig.transitiveDependencies
+		) {
+			return API.Q.resolve();
+		}
+
+
+		function exportDependencies (dependencies) {
+
+			return API.Q.denodeify(function (callback) {
+
+				var descriptor = {
+					"dependencies": dependencies
+				};
+
+				if (API.FS.existsSync(resolvedConfig.export.catalog)) {
+					descriptor = API.DEEPMERGE(
+						JSON.parse(API.FS.readFileSync(resolvedConfig.export.catalog, "utf8")),
+						descriptor
+					);
+				}
+
+				return API.FS.outputFile(
+					resolvedConfig.export.catalog,
+					JSON.stringify(descriptor, null, 4),
+					"utf8",
+					callback
+				);
+			})();
+		}
+
+		return exportDependencies(resolvedConfig.transitiveDependencies);
+	}
+
+	return exports;
+}
+
+
