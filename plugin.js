@@ -732,12 +732,15 @@ exports.for = function (API) {
 					var descriptor = JSON.parse(API.FS.readFileSync(descriptorPath, "utf8"));
 					if (descriptor.dependencies) {
 						for (var name in descriptor.dependencies) {
-							var version = require(API.PATH.join(basePath, "node_modules", name, "package.json")).version;
-							if (
-								!resolvedConfig.transitiveDependencies[name] ||
-								SEMVER.gt(version, resolvedConfig.transitiveDependencies[name])
-							) {
-								resolvedConfig.transitiveDependencies[name] = version;
+							var descriptorPath = API.PATH.join(basePath, "node_modules", name, "package.json");
+							if (API.FS.existsSync(descriptorPath)) {
+								var version = require(descriptorPath).version;
+								if (
+									!resolvedConfig.transitiveDependencies[name] ||
+									SEMVER.gt(version, resolvedConfig.transitiveDependencies[name])
+								) {
+									resolvedConfig.transitiveDependencies[name] = version;
+								}
 							}
 						}
 					}
