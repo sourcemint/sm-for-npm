@@ -1,18 +1,18 @@
 {
-  "name": "smi-for-npm",
-  "version": "0.1.0",
-  "main": "plugin.js",
-  "bin": {
-    "smi-for-npm": "./bin/smi-for-npm"
-  },
-  "dependencies": {
-    "bash.origin": "0.1.x",
-    "fs-extra": "^0.18.3",
-    "fswalker": "0.1.x",
-    "glob": "^5.0.6",
-    "json-stable-stringify": "^1.0.0",
-    "pinf-it-package-insight": "0.1.x",
-    "semver": "^4.3.6",
-    "waitfor": "^0.1.3"
-  }
+    "name": "smi-for-npm",
+    "version": "0.1.1",
+    "main": "plugin.js",
+    "bin": {
+        "smi-for-npm": "./bin/smi-for-npm"
+    },
+    "dependencies": {
+        "bash.origin": "0.1.x",
+        "fs-extra": "^0.18.3",
+        "fswalker": "0.1.x",
+        "glob": "^5.0.6",
+        "json-stable-stringify": "^1.0.0",
+        "pinf-it-package-insight": "0.1.x",
+        "semver": "^4.3.6",
+        "waitfor": "^0.1.3"
+    }
 }
