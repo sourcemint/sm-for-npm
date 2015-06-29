@@ -1,6 +1,7 @@
 
 const PATH = require("path");
 const FS = require("fs-extra");
+const Q = require("q");
 const FSWALKER = require("fswalker");
 const CRYPTO = require("crypto");
 const SPAWN = require("child_process").spawn;
@@ -71,7 +72,7 @@ function makeAPI (basePath, options) {
 			FS: FS,
 			WAITFOR: WAITFOR,
 			Q: Q
-		})(basePath, packages).then(function () {
+		}).PLFunction(basePath, packages).then(function () {
 			return callback(null);
 		}, callback);
     }
