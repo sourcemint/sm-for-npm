@@ -637,6 +637,18 @@ exports.install = function (basePath, options, callback) {
 }
 
 
+/*
+
+TODO: Remove
+DEPRECATED: This is now done by `sm.contract`.
+
+    "github.com/sourcemint/smi-for-npm/0": {
+        "$to": "smi-npm-catalog",
+        "declaredMappings": "{{$from.smi-git-catalog.declaredMappings}}",
+        "export": {
+            "catalog": "{{env.PGS_WORKSPACE_ROOT}}/smi.json"
+        }
+    }
 
 
 exports.for = function (API) {
@@ -740,4 +752,4 @@ exports.for = function (API) {
 	return exports;
 }
 
-
+*/
