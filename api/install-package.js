@@ -10,7 +10,7 @@ exports.for = function (API) {
 
 			if (process.env.VERBOSE) console.log("Installing with 'npm': " + basePath);
 
-			if (!API.FS.existsSync(API.FS.join(basePath, "package.json"))) {
+			if (!API.FS.existsSync(API.PATH.join(basePath, "package.json"))) {
 				return callback(new Error("Cannot install package '" + basePath + "' as no package.json found!"));
 			}
 
