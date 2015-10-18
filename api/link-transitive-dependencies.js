@@ -79,8 +79,12 @@ exports.for = function (API) {
 															// TODO: Test version and other aspect compatibilty and pick best source version
 															//       If not matching version is available error out or continue if ignoring.
 
-															return API.FS.symlink(sourcePath, targetPath, callback);
-														});														
+															return API.FS.symlink(
+																API.PATH.relative(API.PATH.dirname(targetPath),  sourcePath),
+																targetPath,
+																callback
+															);
+														});
 													});
 												}
 											);
